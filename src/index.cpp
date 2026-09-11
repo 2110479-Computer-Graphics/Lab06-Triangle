@@ -13,27 +13,28 @@ static void reportIncomplete(const VkVertexInputBindingDescription& binding,
                              const std::vector<VkVertexInputAttributeDescription>& attrs)
 {
   std::cout << "  incomplete     nothing was drawn because student.cpp is not finished:\n";
-  if (TRIANGLE.empty())
-    std::cout << "                 TASK 1a: TRIANGLE has no vertices\n";
-  if (binding.stride == 0)
-    std::cout << "                 TASK 1b: stride is still 0\n";
-  if (attrs.size() != 2)
-    std::cout << "                 TASK 1c: " << attrs.size() << " of 2 attributes described\n";
+  if (binding.stride == 0 || attrs.size() != 2)
+    std::cout << "                 TASK 1: finish Part I first, the square reuses it\n";
+  if (QUAD.size() != 4)
+    std::cout << "                 TASK 4a: QUAD has " << QUAD.size() << " of 4 corners\n";
+  if (QUAD_INDICES.size() != 6)
+    std::cout << "                 TASK 4b: QUAD_INDICES has " << QUAD_INDICES.size()
+              << " of 6 indices\n";
 }
 
-static void reportCentroid(const std::vector<std::uint8_t>& rgba, const Target& target) {
-  glm::vec2 centroid(0.0f);
-  for (const Vertex& v : TRIANGLE)
-    centroid += v.pos;
-  centroid /= static_cast<float>(TRIANGLE.size());
+static void reportBytes() {
+  std::size_t indices  = QUAD_INDICES.size();
+  std::size_t unindexed = indices * sizeof(Vertex);
+  std::size_t indexed   = QUAD.size() * sizeof(Vertex) + indices * sizeof(std::uint16_t);
 
-  std::uint32_t x = static_cast<std::uint32_t>((centroid.x * 0.5f + 0.5f) * target.width);
-  std::uint32_t y = static_cast<std::uint32_t>((centroid.y * 0.5f + 0.5f) * target.height);
-  std::vector<std::uint8_t> pixel = pixelAt(rgba, target.width, x, y);
-
-  std::cout << "  centroid       pixel (" << x << ", " << y << ") reads ("
-            << static_cast<int>(pixel[0]) << ", " << static_cast<int>(pixel[1]) << ", "
-            << static_cast<int>(pixel[2]) << ")\n";
+  std::cout << "  unindexed      " << indices << " vertices x " << sizeof(Vertex) << " B = "
+            << unindexed << " bytes\n";
+  std::cout << "  indexed        " << QUAD.size() << " x " << sizeof(Vertex) << " B + " << indices
+            << " x 2 B = " << indexed << " bytes\n";
+  if (unindexed > 0)
+    std::cout << "  saving         "
+              << (1.0 - static_cast<double>(indexed) / static_cast<double>(unindexed)) * 100.0
+              << "%\n";
 }
 
 int main() {
@@ -42,10 +43,10 @@ int main() {
     std::vector<VkVertexInputAttributeDescription> attrs = Vertex::attributeDescriptions();
     std::vector<std::uint8_t> params = uniformBlock(0, 0);
 
-    std::uint32_t vertexCount = static_cast<std::uint32_t>(TRIANGLE.size());
-    bool ready = vertexCount > 0 && binding.stride > 0 && attrs.size() == 2;
+    std::uint32_t indexCount = static_cast<std::uint32_t>(QUAD_INDICES.size());
+    bool ready = binding.stride > 0 && attrs.size() == 2 && QUAD.size() == 4 && indexCount == 6;
 
-    GLFWwindow*  handle     = createHiddenWindow("Lab 06 - Part I", WIDTH, HEIGHT);
+    GLFWwindow*  handle     = createHiddenWindow("Lab 06 - Part V", WIDTH, HEIGHT);
     Device       dev        = createDevice(handle);
     VkRenderPass renderPass = createRenderPass(dev);
     Target       target     = createTarget(dev, renderPass, WIDTH, HEIGHT);
@@ -54,10 +55,15 @@ int main() {
     Buffer uniform = createBuffer(dev, params.size(), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     uploadBuffer(uniform, params.data(), params.size());
 
-    Buffer vertices = createBuffer(dev, sizeof(Vertex) * std::max(vertexCount, 1u),
+    Buffer vertices = createBuffer(dev, sizeof(Vertex) * std::max<std::size_t>(QUAD.size(), 1),
                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    if (vertexCount > 0)
-      uploadBuffer(vertices, TRIANGLE.data(), sizeof(Vertex) * vertexCount);
+    if (!QUAD.empty())
+      uploadBuffer(vertices, QUAD.data(), sizeof(Vertex) * QUAD.size());
+
+    Buffer indices = createBuffer(dev, sizeof(std::uint16_t) * std::max(indexCount, 1u),
+                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    if (indexCount > 0)
+      uploadBuffer(indices, QUAD_INDICES.data(), sizeof(std::uint16_t) * indexCount);
 
     Descriptors      descs  = createDescriptors(dev, uniform);
     VkPipelineLayout layout = createPipelineLayout(dev, descs);
@@ -90,28 +96,23 @@ int main() {
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
                                     &descs.set, 0, nullptr);
             vkCmdBindVertexBuffers(cmd, 0, 1, &vertices.handle, &offset);
-            vkCmdDraw(cmd, vertexCount, 1, 0, 0);
+            vkCmdBindIndexBuffer(cmd, indices.handle, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
         }
         vkCmdEndRenderPass(cmd);
     });
 
     std::vector<std::uint8_t> rgba = readTarget(dev, target);
     double drawn = coverage(rgba);
-    double diff  = diffFromReference("triangle", rgba, target.width, target.height);
+    double diff  = diffFromReference("index", rgba, target.width, target.height);
 
     std::cout << std::fixed << std::setprecision(1);
-    std::cout << "  vertex buffer  " << vertexCount << " vertices, stride " << binding.stride
-              << ", offsets [";
-    for (const VkVertexInputAttributeDescription& attr : attrs)
-      std::cout << attr.offset << " ";
-    std::cout << "]\n";
-    std::cout << "  uniform block  " << params.size() << " bytes\n";
+    reportBytes();
+    std::cout << "  index type     VK_INDEX_TYPE_UINT16\n";
     std::cout << "  rasterized     " << drawn * 100.0 << "% of the target\n";
 
-    if (vertexCount > 0) reportCentroid(rgba, target);
-
     if (diff < 0.0 && ready && drawn > 0.0) {
-      writePng(std::string(REFERENCE_DIR) + "/triangle.png", rgba, target.width, target.height);
+      writePng(std::string(REFERENCE_DIR) + "/index.png", rgba, target.width, target.height);
       std::cout << "  image          no reference found, wrote one: check it by eye\n";
     }
     else if (diff < 0.0) {
@@ -125,13 +126,9 @@ int main() {
 
     if (!ready) {
       reportIncomplete(binding, attrs);
-    } else if (std::all_of(params.begin(), params.begin() + 64,
-                           [](std::uint8_t b) { return b == 0; })) {
-      std::cout << "  hint           your uniform block is all zeros, so every vertex\n"
-                << "                 collapses to the origin. TASK 2 writes that matrix\n";
-    } else if (drawn == 0.0) {
-      std::cout << "  hint           nothing was rasterized. Check your winding against\n"
-                << "                 VK_FRONT_FACE_COUNTER_CLOCKWISE, and the sign of y\n";
+    } else if (drawn > 0.0 && drawn < 0.24) {
+      std::cout << "  hint           only part of the square was drawn. One of your two\n"
+                << "                 triangles is wound the other way, so it was culled\n";
     }
 
     std::cout << std::setprecision(3);
@@ -149,6 +146,7 @@ int main() {
     }
     vkDestroyPipelineLayout(dev.device, layout, nullptr);
     destroyDescriptors(dev, descs);
+    destroyBuffer(dev, indices);
     destroyBuffer(dev, vertices);
     destroyBuffer(dev, uniform);
     destroySwapchain(dev, win);
