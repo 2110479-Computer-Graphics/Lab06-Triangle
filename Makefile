@@ -1,5 +1,5 @@
 BUILD := build
-PARTS := info triangle
+PARTS := info triangle cost stripes earlyz index probe
 
 .PHONY: all clean $(PARTS)
 

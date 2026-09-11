@@ -93,7 +93,7 @@ target_compile_definitions(lab06core PUBLIC
 
 # ── One executable per part ───────────────────────────────────────────────────
 set(STUDENT "${CMAKE_SOURCE_DIR}/student.cpp" CACHE FILEPATH "which student.cpp to build")
-set(PARTS info triangle)
+set(PARTS info triangle cost stripes earlyz index probe)
 
 foreach(PART ${PARTS})
  file(GLOB PART_SOURCE src/${PART}*.cpp)
